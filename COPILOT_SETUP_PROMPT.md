@@ -55,7 +55,7 @@ Build a Python-based multi-agent AI system that:
 ## AI
 
 - OpenAI
-- xAI Grok
+- Groq
 
 ## Workflow
 
@@ -150,8 +150,9 @@ LLM_PROVIDER=openai
 OPENAI_API_KEY=your_openai_key
 OPENAI_MODEL=gpt-4o-mini
 
-XAI_API_KEY=your_xai_key
-XAI_MODEL=grok-3-mini
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 ```
 
 `.gitignore` must exclude:
@@ -233,7 +234,7 @@ Important:
 Support:
 
 - OpenAI
-- xAI Grok
+- Groq
 
 Switch provider dynamically using `.env`.
 

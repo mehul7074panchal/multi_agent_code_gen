@@ -75,7 +75,7 @@ Final Output
 ## AI / LLM
 
 - OpenAI
-- xAI Grok
+- Groq
 
 ## Agent Framework
 
@@ -371,7 +371,7 @@ The system supports multiple LLM providers dynamically using environment variabl
 Supported Providers:
 
 - OpenAI
-- xAI Grok
+- Groq
 
 Switch provider without changing code.
 
@@ -387,8 +387,9 @@ LLM_PROVIDER=openai
 OPENAI_API_KEY=your_openai_key
 OPENAI_MODEL=gpt-4o-mini
 
-XAI_API_KEY=your_xai_key
-XAI_MODEL=grok-3-mini
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_BASE_URL=https://api.groq.com/openai/v1
 ```
 
 ---
@@ -401,10 +402,10 @@ XAI_MODEL=grok-3-mini
 LLM_PROVIDER=openai
 ```
 
-## Grok/xAI
+## Groq
 
 ```env
-LLM_PROVIDER=xai
+LLM_PROVIDER=groq
 ```
 
 ---
@@ -426,7 +427,7 @@ llm/llm_client.py
 ### Features
 
 - OpenAI support
-- xAI Grok support
+- Groq support
 - Reusable prompt execution
 - Single configuration point
 
