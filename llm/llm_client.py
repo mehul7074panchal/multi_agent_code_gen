@@ -7,8 +7,18 @@ from openai import OpenAI
 load_dotenv(override=True)
 
 
-SUPPORTED_PROVIDERS = {"openai", "xai"}
-DEFAULT_XAI_BASE_URL = "https://api.x.ai/v1"
+SUPPORTED_PROVIDERS = {"openai", "groq"}
+DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+
+def _require_api_key(value: str | None, env_name: str, provider_name: str) -> str:
+    if not value or value.strip().startswith("your_"):
+        raise ValueError(
+            f"{env_name} is missing or still uses the placeholder value. "
+            f"Add a valid {provider_name} API key to your .env file."
+        )
+
+    return value.strip()
 
 
 def _get_provider() -> str:
@@ -25,20 +35,22 @@ def _get_provider() -> str:
 
 def _build_client(provider: str) -> tuple[OpenAI, str]:
     if provider == "openai":
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = _require_api_key(
+            os.getenv("OPENAI_API_KEY"),
+            "OPENAI_API_KEY",
+            "OpenAI",
+        )
         model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-        if not api_key:
-            raise ValueError("OPENAI_API_KEY is missing. Add it to your .env file.")
 
         return OpenAI(api_key=api_key), model
 
-    api_key = os.getenv("XAI_API_KEY")
-    model = os.getenv("XAI_MODEL", "grok-3-mini")
-    base_url = os.getenv("XAI_BASE_URL", DEFAULT_XAI_BASE_URL)
-
-    if not api_key:
-        raise ValueError("XAI_API_KEY is missing. Add it to your .env file.")
+    api_key = _require_api_key(
+        os.getenv("GROQ_API_KEY"),
+        "GROQ_API_KEY",
+        "Groq",
+    )
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    base_url = os.getenv("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL)
 
     return OpenAI(api_key=api_key, base_url=base_url), model
 
@@ -49,7 +61,7 @@ def call_llm(system_prompt: str, user_prompt: str) -> str:
 
     Provider is selected with LLM_PROVIDER in .env:
     - openai
-    - xai
+    - groq
     """
     if not system_prompt or not system_prompt.strip():
         raise ValueError("System prompt cannot be empty.")
