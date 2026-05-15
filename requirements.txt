@@ -1,0 +1,6 @@
+openai
+langgraph
+gradio
+pytest
+python-dotenv
+rich
