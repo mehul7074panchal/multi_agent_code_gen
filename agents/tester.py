@@ -87,6 +87,47 @@ Return only valid Python pytest code."""
     return normalize_generated_code_imports(clean_code_response(response))
 
 
+def generate_tests_from_requirements(requirements: dict) -> str:
+    """
+    Generate pytest test cases from structured requirements before code exists.
+    """
+    if not isinstance(requirements, dict):
+        raise ValueError("Requirements must be a dictionary.")
+
+    original_prompt = str(requirements.get("original_prompt") or "").strip()
+    function_name = str(requirements.get("function_name") or "").strip()
+
+    if not original_prompt and not function_name:
+        raise ValueError("Requirements must include an original prompt or function name.")
+
+    requirements_prompt = f"""Write practical pytest test cases for code that will be generated from these structured requirements:
+
+{requirements}
+
+Target module:
+- Import generated functions and classes from generated_code
+
+Known target:
+- Function name: {function_name or "infer from requirements"}
+
+Requirements:
+- Generate tests based only on the structured requirements above
+- Test the expected behavior, edge cases, and special requirements
+- Import the target function/class from generated_code
+- If a function_name is provided, tests must call that exact function name
+- Do not test implementation details
+- Do not invent validation rules unless the requirements explicitly ask for them
+- Type hints do not count as runtime validation
+- Prefer tests that should pass for a straightforward implementation
+
+Return only valid Python pytest code."""
+
+    from llm.llm_client import call_llm
+
+    response = call_llm(SYSTEM_PROMPT, requirements_prompt)
+    return normalize_generated_code_imports(clean_code_response(response))
+
+
 def generate_tests(python_code: str, code_description: str = "") -> str:
     """
     Generate pytest test cases for the given Python code.

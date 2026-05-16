@@ -1,10 +1,11 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from typing import TypedDict
 
 from agents.python_coder import generate_python_code
-from agents.requirements_agent import extract_requirements
+from agents.requirements import extract_requirements
 from agents.router import route_request
-from agents.tester import generate_tests
+from agents.tester import generate_tests_from_requirements
 from executor import run_tests
 from utils.code_parser import validate_python_code
 from utils.import_normalizer import normalize_generated_code_imports
@@ -27,9 +28,10 @@ LANGGRAPH_FLOW_EDGES = [
     ("START", "route"),
     ("route", "requirements"),
     ("requirements", "code_generation"),
+    ("requirements", "test_generation"),
     ("code_generation", "ast_validation"),
-    ("ast_validation", "test_generation"),
     ("test_generation", "execution"),
+    ("ast_validation", "execution"),
     ("execution", "evaluation"),
     ("evaluation", "END"),
 ]
@@ -105,6 +107,28 @@ def _truncate_text(text: str, limit: int = 900) -> str:
     return text[:limit].rstrip() + "..."
 
 
+def _build_code_prompt_from_requirements(user_prompt: str, requirements: dict) -> str:
+    """Give the code agent the same contract that the test agent uses."""
+    function_name = requirements.get("function_name")
+    parameters = requirements.get("parameters") or []
+    expected_output = requirements.get("expected_output")
+    special_requirements = requirements.get("special_requirements") or []
+
+    return f"""Create Python code for this user request:
+
+{user_prompt.strip()}
+
+Structured requirements:
+- language: {requirements.get("language", "Python")}
+- task_type: {requirements.get("task_type", "function")}
+- function_name: {function_name or "infer a clear snake_case name"}
+- parameters: {parameters}
+- expected_output: {expected_output or "infer from request"}
+- special_requirements: {special_requirements}
+
+Follow the structured requirements exactly when they are present."""
+
+
 def run_workflow(user_prompt: str) -> dict:
     """
     Run the simple linear multi-agent workflow.
@@ -125,9 +149,15 @@ def run_workflow(user_prompt: str) -> dict:
 
         print("Extracting requirements...")
         requirements = extract_requirements(user_prompt)
+        code_prompt = _build_code_prompt_from_requirements(user_prompt, requirements)
 
-        print("Generating code...")
-        generated_code = generate_python_code(user_prompt)
+        print("Generating code and tests in parallel...")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            code_future = executor.submit(generate_python_code, code_prompt)
+            tests_future = executor.submit(generate_tests_from_requirements, requirements)
+
+            generated_code = code_future.result()
+            generated_tests = tests_future.result()
 
         print("Validating generated code...")
         ast_validation = validate_python_code(generated_code)
@@ -139,11 +169,9 @@ def run_workflow(user_prompt: str) -> dict:
                 "route": route,
                 "requirements": requirements,
                 "generated_code": generated_code,
+                "generated_tests": generated_tests,
                 "ast_validation": ast_validation,
             }
-
-        print("Generating tests...")
-        generated_tests = generate_tests(generated_code)
 
         print("Normalizing test imports...")
         generated_tests = normalize_generated_code_imports(generated_tests)
@@ -188,7 +216,11 @@ def requirements_node(state: WorkflowState) -> WorkflowState:
 
 def code_generation_node(state: WorkflowState) -> WorkflowState:
     print("Generating code...")
-    state["generated_code"] = generate_python_code(state["user_prompt"])
+    code_prompt = _build_code_prompt_from_requirements(
+        state["user_prompt"],
+        state["requirements"],
+    )
+    state["generated_code"] = generate_python_code(code_prompt)
     return state
 
 
@@ -200,7 +232,7 @@ def ast_validation_node(state: WorkflowState) -> WorkflowState:
 
 def test_generation_node(state: WorkflowState) -> WorkflowState:
     print("Generating tests...")
-    generated_tests = generate_tests(state["generated_code"])
+    generated_tests = generate_tests_from_requirements(state["requirements"])
     state["generated_tests"] = normalize_generated_code_imports(generated_tests)
     return state
 
@@ -249,9 +281,9 @@ def build_langgraph_workflow():
     workflow.set_entry_point("route")
     workflow.add_edge("route", "requirements")
     workflow.add_edge("requirements", "code_generation")
+    workflow.add_edge("requirements", "test_generation")
     workflow.add_edge("code_generation", "ast_validation")
-    workflow.add_edge("ast_validation", "test_generation")
-    workflow.add_edge("test_generation", "execution")
+    workflow.add_edge(["ast_validation", "test_generation"], "execution")
     workflow.add_edge("execution", "evaluation")
     workflow.add_edge("evaluation", END)
 
