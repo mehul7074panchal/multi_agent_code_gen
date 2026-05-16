@@ -1,9 +1,6 @@
 import json
 import re
 
-from llm.llm_client import call_llm
-
-
 SYSTEM_PROMPT = """You are a software requirements analyst.
 
 Extract clear structured requirements from the user's coding request.
@@ -74,6 +71,8 @@ Rules:
 - Split independent sentences into separate requirements.
 - Preserve details about edge cases, error handling, type hints, and docstrings.
 - Do not combine all requirements into one string."""
+
+    from llm.llm_client import call_llm
 
     response = call_llm(SYSTEM_PROMPT, prompt)
 

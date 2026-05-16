@@ -2,6 +2,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from utils.import_normalizer import normalize_generated_code_imports
+
 
 SANDBOX_DIR = Path("sandbox")
 CODE_FILE = SANDBOX_DIR / "generated_code.py"
@@ -20,12 +22,14 @@ def run_tests(generated_code: str, generated_tests: str) -> dict:
         raise ValueError("Generated tests cannot be empty.")
 
     SANDBOX_DIR.mkdir(exist_ok=True)
+    generated_tests = normalize_generated_code_imports(generated_tests)
+
     CODE_FILE.write_text(generated_code.strip() + "\n", encoding="utf-8")
     TEST_FILE.write_text(generated_tests.strip() + "\n", encoding="utf-8")
 
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pytest", TEST_FILE.name],
+            [sys.executable, "-m", "pytest", TEST_FILE.name, "--color=no"],
             capture_output=True,
             text=True,
             timeout=TIMEOUT_SECONDS,

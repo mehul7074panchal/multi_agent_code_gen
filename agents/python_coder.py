@@ -1,6 +1,3 @@
-from llm.llm_client import call_llm
-
-
 SYSTEM_PROMPT = """You are an expert Python software engineer.
 
 Generate clean executable Python code.
@@ -46,6 +43,8 @@ def generate_python_code(user_prompt: str) -> str:
 {user_prompt.strip()}
 
 Return only valid Python code."""
+
+    from llm.llm_client import call_llm
 
     response = call_llm(SYSTEM_PROMPT, coding_prompt)
     return clean_code_response(response)

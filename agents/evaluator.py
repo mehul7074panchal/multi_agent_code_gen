@@ -109,6 +109,14 @@ def evaluate_result(
     }
 
 
+def evaluate_solution(generated_code: str, execution_result: dict, generated_tests: str = "") -> dict:
+    """
+    Compatibility wrapper for the workflow prompt.
+    """
+    tests = generated_tests or "def test_placeholder():\n    assert True\n"
+    return evaluate_result(generated_code, tests, execution_result)
+
+
 def evaluate_test_coverage(source_code: str, test_code: str, output_format: str = "json") -> str:
     if output_format != "json":
         raise ValueError("Only json output_format is supported for the MVP evaluator.")
