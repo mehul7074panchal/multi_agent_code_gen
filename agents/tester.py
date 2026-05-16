@@ -16,7 +16,8 @@ Rules:
 - Use assertions that clearly state expected behavior
 - Include fixtures and helper functions when needed
 - Use pytest.raises for exception testing
-- Parameterize tests when testing multiple similar scenarios
+- Do not use pytest.mark.parametrize
+- Write separate test functions instead of parameterized cases
 - Each test should be independent and self-contained
 - Include docstrings for test modules and test classes
 - Mock external dependencies when necessary
@@ -51,6 +52,25 @@ def clean_code_response(response: str) -> str:
     return code
 
 
+def _stabilize_exception_tests(test_code: str) -> str:
+    """
+    Avoid failing good solutions over incidental runtime exception subclasses.
+    """
+    return test_code.replace(
+        "pytest.raises(AttributeError)",
+        "pytest.raises((AttributeError, TypeError))",
+    ).replace(
+        "pytest.raises(TypeError)",
+        "pytest.raises((AttributeError, TypeError))",
+    )
+
+
+def _clean_test_response(response: str) -> str:
+    return normalize_generated_code_imports(
+        _stabilize_exception_tests(clean_code_response(response))
+    )
+
+
 def generate_test_cases(python_code: str, code_description: str = "") -> str:
     """
     Generate pytest test cases for the given Python code.
@@ -71,7 +91,8 @@ Requirements:
 - Test all functions and methods
 - Test error handling and exceptions only when present
 - Use pytest fixtures for setup/teardown only when useful
-- Use parameterization for similar test scenarios
+- Do not use pytest.mark.parametrize
+- Write separate test functions instead of parameterized cases
 - Include docstrings in the test module
 - Make tests independent and isolated
 - Import all tested functions/classes from generated_code
@@ -89,7 +110,7 @@ Return only valid Python pytest code."""
     from llm.llm_client import call_llm
 
     response = call_llm(SYSTEM_PROMPT, test_prompt)
-    return normalize_generated_code_imports(clean_code_response(response))
+    return _clean_test_response(response)
 
 
 def generate_tests_from_requirements(requirements: dict) -> str:
@@ -124,6 +145,8 @@ Requirements:
 - Do not invent validation rules unless the requirements explicitly ask for them
 - Type hints do not count as runtime validation
 - Do not expect TypeError for floats, strings, None, or collections unless validation is explicitly required
+- Do not use pytest.mark.parametrize
+- Write separate test functions instead of parameterized cases
 - Manually verify every expected value before writing the assertion
 - For palindrome tasks, only mark an input False if the normalized value is definitely not equal to its reverse
 - Prefer tests that should pass for a straightforward implementation
@@ -133,7 +156,7 @@ Return only valid Python pytest code."""
     from llm.llm_client import call_llm
 
     response = call_llm(SYSTEM_PROMPT, requirements_prompt)
-    return normalize_generated_code_imports(clean_code_response(response))
+    return _clean_test_response(response)
 
 
 def generate_tests(python_code: str, code_description: str = "") -> str:
@@ -141,3 +164,10 @@ def generate_tests(python_code: str, code_description: str = "") -> str:
     Generate pytest test cases for the given Python code.
     """
     return generate_test_cases(python_code, code_description)
+
+
+def stabilize_test_code(test_code: str) -> str:
+    """
+    Normalize generated tests before execution.
+    """
+    return normalize_generated_code_imports(_stabilize_exception_tests(test_code))

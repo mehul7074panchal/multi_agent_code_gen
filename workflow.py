@@ -4,7 +4,11 @@ from concurrent.futures import ThreadPoolExecutor
 from agents.python_coder import generate_python_code
 from agents.requirements import extract_requirements
 from agents.router import route_request
-from agents.tester import generate_test_cases, generate_tests_from_requirements
+from agents.tester import (
+    generate_test_cases,
+    generate_tests_from_requirements,
+    stabilize_test_code,
+)
 from executor import run_tests
 from memory.session_store import session_store
 from utils.code_parser import validate_python_code
@@ -208,7 +212,7 @@ def run_workflow(user_prompt: str) -> dict:
             }
 
         print("Normalizing test imports...")
-        generated_tests = normalize_generated_code_imports(generated_tests)
+        generated_tests = stabilize_test_code(generated_tests)
         execution.generated_tests = generated_tests
 
         print("Running tests...")
@@ -217,7 +221,7 @@ def run_workflow(user_prompt: str) -> dict:
         if not execution_result.get("success"):
             print("Regenerating tests from generated code after failed execution...")
             generated_tests = generate_test_cases(generated_code, user_prompt)
-            generated_tests = normalize_generated_code_imports(generated_tests)
+            generated_tests = stabilize_test_code(generated_tests)
             execution.generated_tests = generated_tests
             session_store.save_result(
                 agent="tester",

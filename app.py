@@ -15,19 +15,6 @@ import gradio as gr
 from workflow import run_workflow
 
 # ============================================================================
-# EXAMPLE PROMPTS
-# ============================================================================
-
-EXAMPLE_PROMPTS = [
-    "Create a Python palindrome checker that handles case-insensitivity and special characters",
-    "Write a function to check if a number is prime",
-    "Generate a function to reverse a string",
-    "Create a function to find the factorial of a number",
-    "Write code to check if a number is a perfect square",
-]
-
-
-# ============================================================================
 # WORKFLOW STATE MANAGEMENT
 # ============================================================================
 
@@ -125,83 +112,16 @@ def process_workflow(user_prompt: str) -> Tuple[str, str, str, str, str]:
 # ============================================================================
 
 def create_header():
-    """Create the header section with title and workflow badges"""
+    """Create a compact header section."""
     return gr.HTML("""
-    <div style="text-align: center; padding: 40px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                border-radius: 10px; margin-bottom: 30px;">
-        <h1 style="margin: 0; color: white; font-size: 2.5em; font-weight: 800;">
-            🤖 Multi-Agent Natural Language to Code
+    <div style="text-align: center; padding: 14px 18px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 8px; margin-bottom: 14px;">
+        <h1 style="margin: 0; color: white; font-size: 1.45em; font-weight: 800; line-height: 1.2;">
+            Multi-Agent Natural Language to Code
         </h1>
-        <p style="margin: 10px 0; color: rgba(255,255,255,0.9); font-size: 1.1em;">
-            AI Agent Orchestration Demo - Real-time Workflow Visualization
+        <p style="margin: 4px 0 0 0; color: rgba(255,255,255,0.88); font-size: 0.9em;">
+            AI Agent Orchestration Demo
         </p>
-        <div style="margin-top: 20px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
-            <span style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 20px; color: white; font-size: 0.85em;">
-                🔀 Router
-            </span>
-            <span style="color: white; font-size: 0.9em;">→</span>
-            <span style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 20px; color: white; font-size: 0.85em;">
-                💻 Code Gen
-            </span>
-            <span style="color: white; font-size: 0.9em;">→</span>
-            <span style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 20px; color: white; font-size: 0.85em;">
-                🧪 Tests
-            </span>
-            <span style="color: white; font-size: 0.9em;">→</span>
-            <span style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 20px; color: white; font-size: 0.85em;">
-                ⚙️ Execute
-            </span>
-            <span style="color: white; font-size: 0.9em;">→</span>
-            <span style="background: rgba(255,255,255,0.2); padding: 6px 12px; border-radius: 20px; color: white; font-size: 0.85em;">
-                📊 Evaluate
-            </span>
-        </div>
-    </div>
-    """)
-
-def create_workflow_progress_tracker():
-    """Create visual workflow progress tracker"""
-    return gr.HTML("""
-    <div style="background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%); 
-                padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #3b82f6;">
-        <h3 style="margin: 0 0 15px 0; color: #3b82f6;">Workflow Progress</h3>
-        <div id="workflow-progress" style="display: flex; justify-content: space-between; align-items: center;">
-            <div class="workflow-step waiting" style="flex: 1; text-align: center; padding: 10px;">
-                <div style="width: 40px; height: 40px; margin: 0 auto 8px; background: #374151; border-radius: 50%; 
-                           display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">1</div>
-                <span style="color: #9ca3af; font-size: 0.85em;">Router</span>
-            </div>
-            <div style="color: #4b5563;">→</div>
-            <div class="workflow-step waiting" style="flex: 1; text-align: center; padding: 10px;">
-                <div style="width: 40px; height: 40px; margin: 0 auto 8px; background: #374151; border-radius: 50%; 
-                           display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">2</div>
-                <span style="color: #9ca3af; font-size: 0.85em;">Requirements</span>
-            </div>
-            <div style="color: #4b5563;">→</div>
-            <div class="workflow-step waiting" style="flex: 1; text-align: center; padding: 10px;">
-                <div style="width: 40px; height: 40px; margin: 0 auto 8px; background: #374151; border-radius: 50%; 
-                           display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">3</div>
-                <span style="color: #9ca3af; font-size: 0.85em;">Code Gen</span>
-            </div>
-            <div style="color: #4b5563;">→</div>
-            <div class="workflow-step waiting" style="flex: 1; text-align: center; padding: 10px;">
-                <div style="width: 40px; height: 40px; margin: 0 auto 8px; background: #374151; border-radius: 50%; 
-                           display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">4</div>
-                <span style="color: #9ca3af; font-size: 0.85em;">Tests</span>
-            </div>
-            <div style="color: #4b5563;">→</div>
-            <div class="workflow-step waiting" style="flex: 1; text-align: center; padding: 10px;">
-                <div style="width: 40px; height: 40px; margin: 0 auto 8px; background: #374151; border-radius: 50%; 
-                           display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">5</div>
-                <span style="color: #9ca3af; font-size: 0.85em;">Execute</span>
-            </div>
-            <div style="color: #4b5563;">→</div>
-            <div class="workflow-step waiting" style="flex: 1; text-align: center; padding: 10px;">
-                <div style="width: 40px; height: 40px; margin: 0 auto 8px; background: #374151; border-radius: 50%; 
-                           display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">6</div>
-                <span style="color: #9ca3af; font-size: 0.85em;">Evaluate</span>
-            </div>
-        </div>
     </div>
     """)
 
@@ -246,7 +166,7 @@ def render_tests_tab(tests: Optional[str]) -> str:
     html = f"""
     <div style="display: flex; flex-direction: column; gap: 15px;">
         <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 15px; border-radius: 8px; color: white;">
-            <div style="font-size: 0.85em; color: rgba(255,255,255,0.8);">Test Functions</div>
+            <div style="font-size: 0.85em; color: rgba(255,255,255,0.8);">Test Definitions</div>
             <div style="font-size: 1.8em; font-weight: bold;">{test_count}</div>
         </div>
         <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 15px; overflow-x: auto;">
@@ -340,7 +260,7 @@ def render_evaluation_tab(evaluation_results: Optional[dict]) -> str:
                 <div style="background: #0f172a; padding: 10px; border-radius: 6px;">
                     <div style="color: #cbd5e1; font-size: 0.85em;">{func_name}</div>
                     <div style="color: #10b981; font-size: 1.2em; font-weight: bold;">{func_data.get('coverage_percentage', 0)}%</div>
-                    <div style="color: #64748b; font-size: 0.75em;">Test Cases: {func_data.get('test_cases', 0)}</div>
+                    <div style="color: #64748b; font-size: 0.75em;">Test Definitions: {func_data.get('test_cases', 0)}</div>
                 </div>
             """
     
@@ -350,94 +270,6 @@ def render_evaluation_tab(evaluation_results: Optional[dict]) -> str:
     </div>
     """
     return html
-
-def render_agent_trace_tab(logs: str) -> str:
-    """Render the Agent Trace tab"""
-    return f"""
-    <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 15px; overflow-x: auto; max-height: 600px; overflow-y: auto;">
-        <pre style="margin: 0; color: #10b981; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.9em;"><code>{logs}</code></pre>
-    </div>
-    """
-
-def render_architecture_tab() -> str:
-    """Render the Architecture View tab"""
-    return """
-    <div style="text-align: center; padding: 30px;">
-        <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                   padding: 40px; border-radius: 12px; margin-bottom: 20px; color: white;">
-            <h3 style="margin: 0 0 15px 0;">📝 User Prompt</h3>
-            <div style="font-size: 0.95em; color: rgba(255,255,255,0.9);">
-                "Create a Python palindrome checker"
-            </div>
-        </div>
-        
-        <div style="display: flex; justify-content: center; margin: 15px 0;">
-            <div style="color: #667eea; font-size: 1.5em;">↓</div>
-        </div>
-        
-        <div style="background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #3b82f6;">
-            <h4 style="margin: 0; color: #3b82f6;">🔀 Router Agent</h4>
-            <p style="margin: 8px 0 0 0; color: #94a3b8; font-size: 0.9em;">Detects task type (Python/SQL)</p>
-        </div>
-        
-        <div style="display: flex; justify-content: center; margin: 15px 0;">
-            <div style="color: #667eea; font-size: 1.5em;">↓</div>
-        </div>
-        
-        <div style="background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #667eea;">
-            <h4 style="margin: 0; color: #667eea;">📋 Requirements Agent</h4>
-            <p style="margin: 8px 0 0 0; color: #94a3b8; font-size: 0.9em;">Extracts structured requirements</p>
-        </div>
-        
-        <div style="display: flex; justify-content: center; margin: 15px 0;">
-            <div style="color: #667eea; font-size: 1.5em;">↓</div>
-        </div>
-        
-        <div style="background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #f093fb;">
-            <h4 style="margin: 0; color: #f093fb;">💻 Code Generation Agent</h4>
-            <p style="margin: 8px 0 0 0; color: #94a3b8; font-size: 0.9em;">Generates executable Python code</p>
-        </div>
-        
-        <div style="display: flex; justify-content: center; margin: 15px 0;">
-            <div style="color: #667eea; font-size: 1.5em;">↓</div>
-        </div>
-        
-        <div style="background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #4facfe;">
-            <h4 style="margin: 0; color: #4facfe;">🧪 Test Generation Agent</h4>
-            <p style="margin: 8px 0 0 0; color: #94a3b8; font-size: 0.9em;">Creates comprehensive pytest test cases</p>
-        </div>
-        
-        <div style="display: flex; justify-content: center; margin: 15px 0;">
-            <div style="color: #667eea; font-size: 1.5em;">↓</div>
-        </div>
-        
-        <div style="background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #10b981;">
-            <h4 style="margin: 0; color: #10b981;">⚙️ Execution Agent</h4>
-            <p style="margin: 8px 0 0 0; color: #94a3b8; font-size: 0.9em;">Runs tests in isolated sandbox</p>
-        </div>
-        
-        <div style="display: flex; justify-content: center; margin: 15px 0;">
-            <div style="color: #667eea; font-size: 1.5em;">↓</div>
-        </div>
-        
-        <div style="background: #1e293b; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 2px solid #f59e0b;">
-            <h4 style="margin: 0; color: #f59e0b;">📊 Evaluation Agent</h4>
-            <p style="margin: 8px 0 0 0; color: #94a3b8; font-size: 0.9em;">Computes coverage & quality metrics</p>
-        </div>
-        
-        <div style="display: flex; justify-content: center; margin: 15px 0;">
-            <div style="color: #667eea; font-size: 1.5em;">↓</div>
-        </div>
-        
-        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
-                   padding: 40px; border-radius: 12px; color: white;">
-            <h3 style="margin: 0 0 15px 0;">✨ Results Dashboard</h3>
-            <div style="font-size: 0.95em; color: rgba(255,255,255,0.9);">
-                Generated Code + Tests + Metrics
-            </div>
-        </div>
-    </div>
-    """
 
 # ============================================================================
 # MAIN APPLICATION
@@ -457,88 +289,59 @@ def create_app():
     .gr-textbox input, .gr-textarea textarea { background: #1e293b; color: #e2e8f0; }
     .gr-button { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
     .gr-button:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4); }
-    .gr-radio { color: #e2e8f0; }
     .gr-label { color: #cbd5e1; }
     """) as demo:
         
         # Header
         create_header()
         
-        # Main content grid
         with gr.Row():
-            # Left Panel - Input and Logs
             with gr.Column(scale=1, min_width=400):
                 gr.Markdown("### 📝 Enter Your Coding Request", elem_id="left-panel-title")
                 
                 user_input = gr.Textbox(
-                    label="Describe what code you want to generate",
+                    label=None,
                     placeholder="Example: Create a Python palindrome checker that handles case sensitivity and special characters...",
                     lines=6,
-                    interactive=True
+                    interactive=True,
+                    show_label=False,
                 )
-                
-                gr.Markdown("#### Quick Examples")
-                example_buttons = gr.Radio(
-                    choices=EXAMPLE_PROMPTS,
-                    label="Select an example",
-                    interactive=True
-                )
-                
-                def set_example(example):
-                    return example
-                
-                example_buttons.change(set_example, example_buttons, user_input)
                 
                 # Control buttons
                 with gr.Row():
                     generate_btn = gr.Button("🚀 Generate Solution", scale=2, variant="primary")
                     clear_btn = gr.Button("🔄 Clear", scale=1)
                 
-                # Workflow progress
-                create_workflow_progress_tracker()
-                
                 # Logs panel
                 gr.Markdown("#### 📋 Live Agent Logs")
                 logs_display = gr.Textbox(
-                    label="Agent Activity",
+                    label=None,
                     lines=15,
                     interactive=False,
                     max_lines=None,
-                    elem_id="logs-panel"
+                    elem_id="logs-panel",
+                    show_label=False,
                 )
-                
-            # Right Panel - Results
+
             with gr.Column(scale=2, min_width=600):
                 gr.Markdown("### 📊 Results & Analysis")
                 
                 with gr.Tabs():
                     with gr.TabItem("Generated Code", id="code_tab"):
-                        code_output = gr.HTML(label="Code")
+                        code_output = gr.HTML()
                     
                     with gr.TabItem("Generated Tests", id="tests_tab"):
-                        tests_output = gr.HTML(label="Tests")
+                        tests_output = gr.HTML()
                     
                     with gr.TabItem("Execution Results", id="execution_tab"):
-                        execution_output = gr.HTML(label="Execution")
+                        execution_output = gr.HTML()
                     
                     with gr.TabItem("Evaluation Report", id="evaluation_tab"):
-                        evaluation_output = gr.HTML(label="Evaluation")
-                    
-                    with gr.TabItem("Agent Trace", id="trace_tab"):
-                        trace_output = gr.Textbox(label="Trace", lines=20, interactive=False)
-                    
-                    with gr.TabItem("Architecture", id="arch_tab"):
-                        arch_output = gr.HTML(label="Architecture")
-        
-        # Initialize architecture tab on load
-        def init_app():
-            return render_architecture_tab()
-        
-        demo.load(init_app, outputs=[arch_output])
+                        evaluation_output = gr.HTML()
         
         # Clear button functionality
         def clear_all():
-            return "", "", "", "", "", "", ""
+            return "", "", "", "", "", ""
         
         clear_btn.click(
             clear_all,
@@ -549,7 +352,6 @@ def create_app():
                 tests_output,
                 execution_output,
                 evaluation_output,
-                trace_output
             ]
         )
         
@@ -563,7 +365,8 @@ def create_app():
                 tests_output,
                 execution_output,
                 evaluation_output
-            ]
+            ],
+            show_progress="minimal",
         )
     
     return demo
