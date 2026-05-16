@@ -1,234 +1,284 @@
-from llm.llm_client import call_llm
-
-
-SYSTEM_PROMPT = """You are an expert Python test evaluator and code coverage analyst.
-
-Evaluate test cases and provide detailed coverage analysis and quality metrics.
-
-Rules:
-- Return ONLY Python code or JSON output as specified
-- No markdown
-- No explanations outside code blocks
-- Provide comprehensive test coverage analysis
-- Evaluate test quality (positive/negative cases, edge cases)
-- Estimate code coverage percentage
-- Identify untested code paths
-- Provide recommendations for missing tests
-- Assess test independence and isolation
-- Check for proper error handling coverage
-- Analyze parameterization efficiency
-- Do not include example usage unless the user asks for it
-"""
-
-
-def clean_response(response: str) -> str:
-    """Remove common markdown code fences from an LLM response."""
-    code = response.strip()
-
-    if code.startswith("```python"):
-        code = code.removeprefix("```python").strip()
-    elif code.startswith("```json"):
-        code = code.removeprefix("```json").strip()
-    elif code.startswith("```py"):
-        code = code.removeprefix("```py").strip()
-    elif code.startswith("```"):
-        code = code.removeprefix("```").strip()
-
-    if code.endswith("```"):
-        code = code.removesuffix("```").strip()
-
-    return code
-
-
-def evaluate_test_coverage(source_code: str, test_code: str, output_format: str = "json") -> str:
-    """
-    Evaluate test cases and generate coverage analysis.
-    
-    Args:
-        source_code: The Python source code being tested
-        test_code: The pytest test code to evaluate
-        output_format: "json" for structured output, "python" for Python report generator
-    
-    Returns:
-        String containing test coverage analysis and metrics
-    """
-    if not source_code or not source_code.strip():
-        raise ValueError("Source code cannot be empty.")
-    if not test_code or not test_code.strip():
-        raise ValueError("Test code cannot be empty.")
-
-    eval_prompt = f"""Evaluate the following test cases and provide detailed coverage analysis.
-
-SOURCE CODE:
-{source_code.strip()}
-
-TEST CODE:
-{test_code.strip()}
-
-Analyze and provide (in {output_format} format):
-1. Estimated code coverage percentage (0-100%)
-2. List of tested functions/methods
-3. List of untested or partially tested functions/methods
-4. Coverage breakdown by function
-5. Number of positive test cases
-6. Number of negative test cases
-7. Edge cases coverage assessment
-8. Error handling coverage assessment
-9. Missing test scenarios (list 3-5 most important)
-10. Overall test quality score (0-10)
-11. Recommendations for improving coverage
-12. Risk assessment for untested code paths
-
-{f"Return as {output_format}." if output_format == "json" else "Return as Python code that generates this report."}"""
-
-    response = call_llm(SYSTEM_PROMPT, eval_prompt)
-    return clean_response(response)
+import ast
+import json
 
 
 def generate_coverage_report_json(source_code: str, test_code: str) -> str:
     """
-    Generate a detailed coverage report in JSON format.
-    
-    Args:
-        source_code: The Python source code being tested
-        test_code: The pytest test code to evaluate
-    
-    Returns:
-        String containing JSON coverage report with all metrics
+    Generate a deterministic lightweight test coverage report.
+
+    This is not runtime line coverage. It is a static MVP report based on
+    function names, imports, assertions, and pytest test functions.
     """
     if not source_code or not source_code.strip():
         raise ValueError("Source code cannot be empty.")
+
     if not test_code or not test_code.strip():
         raise ValueError("Test code cannot be empty.")
 
-    report_prompt = f"""Analyze the following source code and test code, then generate a comprehensive coverage report in JSON format.
+    source_functions = _get_function_names(source_code)
+    test_functions = _get_test_function_nodes(test_code)
+    test_text_by_name = {
+        node.name: ast.get_source_segment(test_code, node) or "" for node in test_functions
+    }
 
-SOURCE CODE:
-{source_code.strip()}
+    tested_functions = [
+        function_name
+        for function_name in source_functions
+        if _is_function_referenced(function_name, test_code)
+    ]
+    untested_functions = [
+        function_name
+        for function_name in source_functions
+        if function_name not in tested_functions
+    ]
 
-TEST CODE:
-{test_code.strip()}
+    total_functions = len(source_functions)
+    tested_count = len(tested_functions)
+    overall_coverage = round((tested_count / total_functions) * 100, 2) if total_functions else 0
 
-Generate JSON with the following structure:
-{{
-    "overall_coverage_percentage": <0-100>,
-    "total_functions": <number>,
-    "tested_functions": <number>,
-    "untested_functions": <number>,
-    "functions": {{
-        "<function_name>": {{
-            "tested": <true/false>,
-            "coverage_percentage": <0-100>,
-            "test_cases": <number>
-        }}
-    }},
-    "test_metrics": {{
-        "total_tests": <number>,
-        "positive_tests": <number>,
-        "negative_tests": <number>,
-        "edge_case_tests": <number>,
-        "error_handling_tests": <number>
-    }},
-    "coverage_assessment": {{
-        "edge_cases": "<good/fair/poor>",
-        "error_handling": "<good/fair/poor>",
-        "parameterization": "<good/fair/poor>"
-    }},
-    "untested_code_paths": [<list of untested functions/methods>],
-    "missing_test_scenarios": [<list of 3-5 important missing scenarios>],
-    "quality_score": <0-10>,
-    "recommendations": [<list of improvement recommendations>],
-    "risk_assessment": "<low/medium/high>"
-}}
+    metrics = _calculate_test_metrics(test_text_by_name)
 
-Return only valid JSON."""
+    report = {
+        "overall_coverage_percentage": overall_coverage,
+        "total_functions": total_functions,
+        "tested_functions": tested_count,
+        "untested_functions": len(untested_functions),
+        "functions": {
+            function_name: {
+                "tested": function_name in tested_functions,
+                "coverage_percentage": 100 if function_name in tested_functions else 0,
+                "test_cases": _count_tests_for_function(function_name, test_text_by_name),
+            }
+            for function_name in source_functions
+        },
+        "test_metrics": metrics,
+        "coverage_assessment": {
+            "edge_cases": _rate_count(metrics["edge_case_tests"]),
+            "error_handling": _rate_count(metrics["error_handling_tests"]),
+            "parameterization": "good" if "@pytest.mark.parametrize" in test_code else "poor",
+        },
+        "untested_code_paths": untested_functions,
+        "missing_test_scenarios": _suggest_missing_tests(untested_functions, metrics),
+        "quality_score": _calculate_quality_score(overall_coverage, metrics),
+        "recommendations": _build_recommendations(untested_functions, metrics),
+        "risk_assessment": _risk_assessment(overall_coverage, metrics),
+    }
 
-    response = call_llm(SYSTEM_PROMPT, report_prompt)
-    return clean_response(response)
+    return json.dumps(report, indent=2)
 
 
-def generate_coverage_report_code(source_code: str, test_code: str) -> str:
+def evaluate_result(
+    generated_code: str,
+    generated_tests: str,
+    execution_result: dict,
+) -> dict:
     """
-    Generate Python code that creates a detailed coverage report.
-    
-    Args:
-        source_code: The Python source code being tested
-        test_code: The pytest test code to evaluate
-    
-    Returns:
-        String containing Python code to generate coverage reports
+    Evaluate generated code quality using the pytest execution result.
     """
-    if not source_code or not source_code.strip():
-        raise ValueError("Source code cannot be empty.")
-    if not test_code or not test_code.strip():
-        raise ValueError("Test code cannot be empty.")
+    if not generated_code or not generated_code.strip():
+        raise ValueError("Generated code cannot be empty.")
 
-    report_prompt = f"""Generate Python code that analyzes and reports on test coverage.
+    if not generated_tests or not generated_tests.strip():
+        raise ValueError("Generated tests cannot be empty.")
 
-SOURCE CODE:
-{source_code.strip()}
+    if not isinstance(execution_result, dict):
+        raise ValueError("Execution result must be a dictionary.")
 
-TEST CODE:
-{test_code.strip()}
+    tests_passed = bool(execution_result.get("success"))
+    coverage_report = json.loads(generate_coverage_report_json(generated_code, generated_tests))
 
-Create a Python module with:
-1. A function to parse and analyze test coverage
-2. A function to calculate coverage percentage
-3. A function to identify untested code paths
-4. A function to generate a formatted coverage report
-5. A function to suggest missing tests
-6. A ReportGenerator class that consolidates all analysis
-7. Functions to output in multiple formats (text, JSON, HTML)
+    if tests_passed:
+        score = max(7, coverage_report["quality_score"])
+        return {
+            "score": score,
+            "tests_passed": True,
+            "summary": "Generated code passed the pytest suite.",
+            "strengths": ["Tests completed successfully."],
+            "issues": coverage_report["recommendations"],
+        }
 
-The code should:
-- Use AST parsing to analyze source code structure
-- Use regex/parsing to analyze test code
-- Calculate accurate coverage metrics
-- Generate clear, actionable recommendations
-- Be production-ready and well-documented
+    return {
+        "score": min(3, coverage_report["quality_score"]),
+        "tests_passed": False,
+        "summary": f"Generated code did not pass the pytest suite. Return code: {execution_result.get('return_code')}.",
+        "strengths": [],
+        "issues": _extract_failure_detail(
+            str(execution_result.get("stdout") or ""),
+            str(execution_result.get("stderr") or ""),
+        ),
+    }
 
-Return only valid Python code."""
 
-    response = call_llm(SYSTEM_PROMPT, report_prompt)
-    return clean_response(response)
+def evaluate_test_coverage(source_code: str, test_code: str, output_format: str = "json") -> str:
+    if output_format != "json":
+        raise ValueError("Only json output_format is supported for the MVP evaluator.")
+
+    return generate_coverage_report_json(source_code, test_code)
 
 
 def analyze_test_quality(test_code: str, test_name: str = "") -> str:
-    """
-    Analyze the quality of test cases.
-    
-    Args:
-        test_code: The pytest test code to analyze
-        test_name: Optional name of the test file/module
-    
-    Returns:
-        String containing JSON with quality metrics
-    """
     if not test_code or not test_code.strip():
         raise ValueError("Test code cannot be empty.")
 
-    quality_prompt = f"""Analyze the quality of these pytest test cases and return JSON metrics.
+    metrics = _calculate_test_metrics(
+        {node.name: ast.get_source_segment(test_code, node) or "" for node in _get_test_function_nodes(test_code)}
+    )
 
-TEST CODE:
-{test_code.strip()}
+    report = {
+        "test_name": test_name,
+        "test_metrics": metrics,
+        "quality_score": _calculate_quality_score(0, metrics),
+    }
 
-{f"Test Name: {test_name}" if test_name else ""}
+    return json.dumps(report, indent=2)
 
-Provide JSON with:
-1. Number of tests
-2. Test count by category (positive, negative, edge cases, error handling)
-3. Average test length (lines of code)
-4. Fixture usage score (0-10)
-5. Parameterization score (0-10)
-6. Assertion quality score (0-10)
-7. Test independence score (0-10)
-8. Documentation quality score (0-10)
-9. Mock/patch usage score (0-10)
-10. Overall test suite quality score (0-10)
-11. Issues found (list of problems)
-12. Improvement suggestions (list)
 
-Return as valid JSON only."""
+def _get_function_names(source_code: str) -> list[str]:
+    tree = ast.parse(source_code)
+    return [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
 
-    response = call_llm(SYSTEM_PROMPT, quality_prompt)
-    return clean_response(response)
+
+def _get_test_function_nodes(test_code: str) -> list[ast.FunctionDef]:
+    tree = ast.parse(test_code)
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name.startswith("test_")
+    ]
+
+
+def _is_function_referenced(function_name: str, test_code: str) -> bool:
+    tree = ast.parse(test_code)
+    return any(
+        isinstance(node, ast.Name) and node.id == function_name for node in ast.walk(tree)
+    )
+
+
+def _calculate_test_metrics(test_text_by_name: dict[str, str]) -> dict:
+    total_tests = len(test_text_by_name)
+    positive_tests = 0
+    negative_tests = 0
+    edge_case_tests = 0
+    error_handling_tests = 0
+
+    for test_name, test_text in test_text_by_name.items():
+        searchable_text = f"{test_name}\n{test_text}".lower()
+
+        is_error_test = "pytest.raises" in searchable_text or "exception" in searchable_text
+        is_edge_test = any(
+            keyword in searchable_text
+            for keyword in ["edge", "zero", "empty", "none", "negative", "invalid", "large"]
+        )
+        is_negative_test = is_error_test or any(
+            keyword in searchable_text
+            for keyword in ["negative", "invalid", "error", "raises", "fail"]
+        )
+
+        if is_negative_test:
+            negative_tests += 1
+        else:
+            positive_tests += 1
+
+        if is_edge_test:
+            edge_case_tests += 1
+
+        if is_error_test:
+            error_handling_tests += 1
+
+    return {
+        "total_tests": total_tests,
+        "positive_tests": positive_tests,
+        "negative_tests": negative_tests,
+        "edge_case_tests": edge_case_tests,
+        "error_handling_tests": error_handling_tests,
+    }
+
+
+def _count_tests_for_function(function_name: str, test_text_by_name: dict[str, str]) -> int:
+    return sum(1 for test_text in test_text_by_name.values() if function_name in test_text)
+
+
+def _rate_count(count: int) -> str:
+    if count >= 3:
+        return "good"
+    if count >= 1:
+        return "fair"
+    return "poor"
+
+
+def _suggest_missing_tests(untested_functions: list[str], metrics: dict) -> list[str]:
+    suggestions = [f"Add tests for {function_name}." for function_name in untested_functions]
+
+    if metrics["negative_tests"] == 0:
+        suggestions.append("Add negative tests for invalid inputs.")
+
+    if metrics["edge_case_tests"] == 0:
+        suggestions.append("Add edge case tests.")
+
+    if metrics["error_handling_tests"] == 0:
+        suggestions.append("Add tests for error handling.")
+
+    return suggestions[:5]
+
+
+def _calculate_quality_score(overall_coverage: float, metrics: dict) -> int:
+    score = round(overall_coverage / 20)
+
+    if metrics["total_tests"] > 0:
+        score += 2
+
+    if metrics["negative_tests"] > 0:
+        score += 1
+
+    if metrics["edge_case_tests"] > 0:
+        score += 1
+
+    if metrics["error_handling_tests"] > 0:
+        score += 1
+
+    return max(0, min(10, score))
+
+
+def _build_recommendations(untested_functions: list[str], metrics: dict) -> list[str]:
+    recommendations = _suggest_missing_tests(untested_functions, metrics)
+    return recommendations or ["Test coverage looks reasonable for the MVP."]
+
+
+def _risk_assessment(overall_coverage: float, metrics: dict) -> str:
+    if overall_coverage < 50 or metrics["total_tests"] == 0:
+        return "high"
+    if overall_coverage < 80 or metrics["negative_tests"] == 0:
+        return "medium"
+    return "low"
+
+
+def _extract_failure_detail(stdout: str, stderr: str) -> list[str]:
+    details = []
+
+    if stderr.strip():
+        details.append(_truncate_text(stderr.strip()))
+
+    failure_lines = [
+        line.strip()
+        for line in stdout.splitlines()
+        if line.strip()
+        and (
+            "error" in line.lower()
+            or "failed" in line.lower()
+            or "assert" in line.lower()
+            or "importerror" in line.lower()
+            or "modulenotfounderror" in line.lower()
+        )
+    ]
+
+    if failure_lines:
+        details.append(_truncate_text("\n".join(failure_lines[:8])))
+
+    return details or ["Tests failed. Inspect stdout and stderr for details."]
+
+
+def _truncate_text(text: str, limit: int = 700) -> str:
+    if len(text) <= limit:
+        return text
+
+    return text[:limit].rstrip() + "..."

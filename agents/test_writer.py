@@ -1,3 +1,5 @@
+import re
+
 from llm.llm_client import call_llm
 
 
@@ -21,6 +23,10 @@ Rules:
 - Include docstrings for test modules and test classes
 - Mock external dependencies when necessary
 - Do not include example usage unless the user asks for it
+- Import generated functions and classes from generated_code
+- Do not import from your_module, main, solution, app, or unknown modules
+- Only test behavior that is visible in the provided code
+- Do not assume extra validation unless it exists in the provided code
 """
 
 
@@ -39,6 +45,48 @@ def clean_code_response(response: str) -> str:
         code = code.removesuffix("```").strip()
 
     return code
+
+
+def normalize_generated_code_imports(test_code: str) -> str:
+    """
+    Replace common placeholder module imports with the sandbox module name.
+    """
+    placeholder_modules = [
+        "your_module",
+        "module_name",
+        "solution",
+        "main",
+        "app",
+    ]
+
+    normalized = test_code
+
+    for module_name in placeholder_modules:
+        normalized = re.sub(
+            rf"from\s+{module_name}\s+import\s+",
+            "from generated_code import ",
+            normalized,
+        )
+        normalized = re.sub(
+            rf"import\s+{module_name}\b",
+            "import generated_code",
+            normalized,
+        )
+
+    normalized = re.sub(
+        r"\s*#\s*replace ['\"]?generated_code['\"]? with the actual module name",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(
+        r"\s*#\s*replace ['\"]?your_module['\"]? with the actual module name",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+
+    return normalized
 
 
 def generate_test_cases(python_code: str, code_description: str = "") -> str:
@@ -70,8 +118,12 @@ Requirements:
 - Use parameterization for similar test scenarios
 - Include docstrings in the test module
 - Make tests independent and isolated
+- Import all tested functions/classes from generated_code
+- Do not use imports like your_module, main, solution, or app
+- Only test behavior visible in the code above
+- Do not invent validation rules that are not present in the code
 
 Return only valid Python pytest code."""
 
     response = call_llm(SYSTEM_PROMPT, test_prompt)
-    return clean_code_response(response)
+    return normalize_generated_code_imports(clean_code_response(response))
