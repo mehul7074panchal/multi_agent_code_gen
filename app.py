@@ -6,8 +6,10 @@ Professional dashboard for AI-powered code generation workflow
 import html as html_lib
 import json
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Iterator, Optional
 import traceback
 
 import gradio as gr
@@ -39,10 +41,9 @@ workflow_state = WorkflowState()
 # PROCESSING FUNCTIONS
 # ============================================================================
 
-def process_workflow(user_prompt: str) -> Tuple[str, str, str, str, str]:
+def process_workflow(user_prompt: str) -> Iterator[tuple[str, str, str, str, str]]:
     """
-    Execute the full workflow: Router → Requirements → Code → Tests → Execution → Evaluation
-    Returns: (logs, code_html, tests_html, execution_html, evaluation_html)
+    Execute the workflow and stream log updates to the UI.
     """
     
     if not user_prompt or not user_prompt.strip():
@@ -53,10 +54,35 @@ def process_workflow(user_prompt: str) -> Tuple[str, str, str, str, str]:
     generated_tests = None
     execution_results = None
     evaluation_json = None
+    empty_outputs = (
+        render_code_tab(None),
+        render_tests_tab(None),
+        render_execution_tab(None),
+        render_evaluation_tab(None),
+    )
     
     try:
         logs = workflow_state.add_log("System", "Starting multi-agent workflow...")
-        result = run_workflow(user_prompt)
+        yield logs, *empty_outputs
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_workflow, user_prompt)
+            start_time = time.time()
+            last_second = -1
+
+            while not future.done():
+                elapsed_seconds = int(time.time() - start_time)
+                if elapsed_seconds != last_second:
+                    last_second = elapsed_seconds
+                    logs = workflow_state.add_log(
+                        "System",
+                        f"Workflow running... {elapsed_seconds}s",
+                    )
+                    yield logs, *empty_outputs
+
+                time.sleep(0.5)
+
+            result = future.result()
 
         if not result.get("success"):
             raise ValueError(result.get("error", "Workflow failed"))
@@ -73,22 +99,38 @@ def process_workflow(user_prompt: str) -> Tuple[str, str, str, str, str]:
             "Router Agent",
             f"✓ Detected: {route_result.get('task_type', 'unknown').upper()} task",
         )
+        yield logs, *empty_outputs
+
         logs = workflow_state.add_log(
             "Requirements Agent",
             f"✓ Extracted requirements for {requirements.get('function_name') or 'generated code'}",
         )
+        yield logs, *empty_outputs
+
         logs = workflow_state.add_log(
             "Code Generation Agent",
             f"✓ Generated {len((generated_code or '').splitlines())} lines of code",
         )
+        yield logs, render_code_tab(generated_code), empty_outputs[1], empty_outputs[2], empty_outputs[3]
+
         logs = workflow_state.add_log(
             "Test Generation Agent",
             f"✓ Created {(generated_tests or '').count('def test_')} test cases",
         )
+        yield logs, render_code_tab(generated_code), render_tests_tab(generated_tests), empty_outputs[2], empty_outputs[3]
+
         logs = workflow_state.add_log(
             "Execution Agent",
             "✓ Tests passed" if execution_results.get("success") else "✗ Tests failed",
         )
+        yield (
+            logs,
+            render_code_tab(generated_code),
+            render_tests_tab(generated_tests),
+            render_execution_tab(execution_results),
+            empty_outputs[3],
+        )
+
         logs = workflow_state.add_log(
             "Evaluation Agent",
             f"✓ Coverage: {evaluation_json.get('overall_coverage_percentage', 0)}%",
@@ -105,7 +147,7 @@ def process_workflow(user_prompt: str) -> Tuple[str, str, str, str, str]:
     execution_html = render_execution_tab(execution_results)
     evaluation_html = render_evaluation_tab(evaluation_json)
     
-    return logs, code_html, tests_html, execution_html, evaluation_html
+    yield logs, code_html, tests_html, execution_html, evaluation_html
 
 # ============================================================================
 # UI RENDERING FUNCTIONS
