@@ -1,30 +1,17 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
-from typing import TypedDict
 
 from agents.python_coder import generate_python_code
 from agents.requirements import extract_requirements
 from agents.router import route_request
-from agents.tester import generate_tests_from_requirements
+from agents.tester import generate_test_cases, generate_tests_from_requirements
 from executor import run_tests
+from memory.session_store import session_store
 from utils.code_parser import validate_python_code
 from utils.import_normalizer import normalize_generated_code_imports
 
 
-class WorkflowState(TypedDict, total=False):
-    user_prompt: str
-    route: dict
-    requirements: dict
-    generated_code: str
-    generated_tests: str
-    ast_validation: dict
-    execution_result: dict
-    evaluation: dict
-    success: bool
-    error: str
-
-
-LANGGRAPH_FLOW_EDGES = [
+WORKFLOW_GRAPH_EDGES = [
     ("START", "route"),
     ("route", "requirements"),
     ("requirements", "code_generation"),
@@ -99,7 +86,7 @@ def _extract_execution_issues(execution_result: dict) -> list[str]:
 
     return ["Tests failed. Inspect execution_result stdout and stderr for details."]
 
-
+# Helper function to truncate long error messages while preserving readability
 def _truncate_text(text: str, limit: int = 900) -> str:
     if len(text) <= limit:
         return text
@@ -133,22 +120,49 @@ def run_workflow(user_prompt: str) -> dict:
     """
     Run the simple linear multi-agent workflow.
     """
+    execution = None
+
     try:
         if not user_prompt or not user_prompt.strip():
             raise ValueError("User prompt cannot be empty")
 
+        execution = session_store.create_execution(user_prompt)
+        execution.status = "running"
+        session_store.save_execution(execution)
+        session_store.set_state("user_prompt", user_prompt.strip())
+        session_store.set_state("pipeline_status", "running")
+
         print("Routing request...")
         route = route_request(user_prompt)
+        execution.route = route
+        session_store.save_result(
+            agent="router",
+            task=user_prompt,
+            report=json.dumps(route, indent=2),
+        )
 
         if route.get("task_type") != "python":
+            error_message = "Current MVP supports Python generation only."
+            execution.status = "failed"
+            execution.error = error_message
+            session_store.save_execution(execution)
+            session_store.set_state("pipeline_status", "failed")
+
             return {
                 "success": False,
-                "error": "Current MVP supports Python generation only.",
+                "error": error_message,
                 "route": route,
+                "execution_id": execution.execution_id,
             }
 
         print("Extracting requirements...")
         requirements = extract_requirements(user_prompt)
+        execution.requirements = requirements
+        session_store.save_result(
+            agent="requirements",
+            task=user_prompt,
+            report=json.dumps(requirements, indent=2),
+        )
         code_prompt = _build_code_prompt_from_requirements(user_prompt, requirements)
 
         print("Generating code and tests in parallel...")
@@ -159,10 +173,29 @@ def run_workflow(user_prompt: str) -> dict:
             generated_code = code_future.result()
             generated_tests = tests_future.result()
 
+        execution.generated_code = generated_code
+        execution.generated_tests = generated_tests
+        session_store.save_result(
+            agent="python_coder",
+            task=code_prompt,
+            code=generated_code,
+        )
+        session_store.save_result(
+            agent="tester",
+            task="Generate pytest tests from structured requirements.",
+            source_code=json.dumps(requirements, indent=2),
+            code=generated_tests,
+        )
+
         print("Validating generated code...")
         ast_validation = validate_python_code(generated_code)
 
         if not ast_validation["valid"]:
+            execution.status = "failed"
+            execution.error = ast_validation["error"]
+            session_store.save_execution(execution)
+            session_store.set_state("pipeline_status", "failed")
+
             return {
                 "success": False,
                 "error": ast_validation["error"],
@@ -171,19 +204,56 @@ def run_workflow(user_prompt: str) -> dict:
                 "generated_code": generated_code,
                 "generated_tests": generated_tests,
                 "ast_validation": ast_validation,
+                "execution_id": execution.execution_id,
             }
 
         print("Normalizing test imports...")
         generated_tests = normalize_generated_code_imports(generated_tests)
+        execution.generated_tests = generated_tests
 
         print("Running tests...")
         execution_result = run_tests(generated_code, generated_tests)
 
+        if not execution_result.get("success"):
+            print("Regenerating tests from generated code after failed execution...")
+            generated_tests = generate_test_cases(generated_code, user_prompt)
+            generated_tests = normalize_generated_code_imports(generated_tests)
+            execution.generated_tests = generated_tests
+            session_store.save_result(
+                agent="tester",
+                task="Regenerate pytest tests from generated code after failed execution.",
+                source_code=generated_code,
+                code=generated_tests,
+            )
+            execution_result = run_tests(generated_code, generated_tests)
+
+        execution.execution_results = execution_result
+        session_store.save_result(
+            agent="execution",
+            task="Run generated pytest suite.",
+            source_code=generated_code,
+            test_code=generated_tests,
+            report=json.dumps(execution_result, indent=2),
+            status="success" if execution_result.get("success") else "failed",
+            error=str(execution_result.get("stderr") or ""),
+        )
+
         print("Evaluating solution...")
         evaluation = _evaluate_solution(generated_code, execution_result, generated_tests)
-
-        # TODO:
-        # save_result(...)
+        execution.evaluation_results = evaluation
+        execution.status = "completed" if execution_result.get("success") else "failed"
+        execution.error = "" if execution_result.get("success") else evaluation["summary"]
+        session_store.save_result(
+            agent="evaluator",
+            task="Evaluate generated solution.",
+            source_code=generated_code,
+            test_code=generated_tests,
+            report=json.dumps(evaluation, indent=2),
+            status="success" if execution_result.get("success") else "failed",
+            error="" if execution_result.get("success") else evaluation["summary"],
+        )
+        session_store.save_execution(execution)
+        session_store.set_state("pipeline_status", execution.status)
 
         return {
             "success": True,
@@ -194,203 +264,75 @@ def run_workflow(user_prompt: str) -> dict:
             "ast_validation": ast_validation,
             "execution_result": execution_result,
             "evaluation": evaluation,
+            "execution_id": execution.execution_id,
+            "memory_summary": session_store.summary(),
         }
     except Exception as error:
+        if execution is not None:
+            execution.status = "failed"
+            execution.error = str(error)
+            session_store.save_execution(execution)
+            session_store.save_result(
+                agent="execution",
+                task="Workflow failed before completion.",
+                status="failed",
+                error=str(error),
+            )
+
+        session_store.set_state("pipeline_status", "failed")
+
         return {
             "success": False,
             "error": str(error),
+            "execution_id": execution.execution_id if execution else None,
         }
 
 
-def route_node(state: WorkflowState) -> WorkflowState:
-    print("Routing request...")
-    state["route"] = route_request(state["user_prompt"])
-    return state
-
-
-def requirements_node(state: WorkflowState) -> WorkflowState:
-    print("Extracting requirements...")
-    state["requirements"] = extract_requirements(state["user_prompt"])
-    return state
-
-
-def code_generation_node(state: WorkflowState) -> WorkflowState:
-    print("Generating code...")
-    code_prompt = _build_code_prompt_from_requirements(
-        state["user_prompt"],
-        state["requirements"],
-    )
-    state["generated_code"] = generate_python_code(code_prompt)
-    return state
-
-
-def ast_validation_node(state: WorkflowState) -> WorkflowState:
-    print("Validating generated code...")
-    state["ast_validation"] = validate_python_code(state["generated_code"])
-    return state
-
-
-def test_generation_node(state: WorkflowState) -> WorkflowState:
-    print("Generating tests...")
-    generated_tests = generate_tests_from_requirements(state["requirements"])
-    state["generated_tests"] = normalize_generated_code_imports(generated_tests)
-    return state
-
-
-def execution_node(state: WorkflowState) -> WorkflowState:
-    print("Running tests...")
-    state["execution_result"] = run_tests(
-        state["generated_code"],
-        state["generated_tests"],
-    )
-    return state
-
-
-def evaluation_node(state: WorkflowState) -> WorkflowState:
-    print("Evaluating solution...")
-    state["evaluation"] = _evaluate_solution(
-        state["generated_code"],
-        state["execution_result"],
-        state["generated_tests"],
-    )
-    state["success"] = True
-    return state
-
-
-def build_langgraph_workflow():
+def get_workflow_mermaid() -> str:
     """
-    Build a lightweight LangGraph workflow for MVP graph orchestration.
+    Return a Mermaid graph for the current MVP workflow.
     """
-    try:
-        from langgraph.graph import END, StateGraph
-    except ImportError as error:
-        raise ImportError(
-            "LangGraph is not installed. Run: pip install -r requirements.txt"
-        ) from error
-
-    workflow = StateGraph(WorkflowState)
-
-    workflow.add_node("route", route_node)
-    workflow.add_node("requirements", requirements_node)
-    workflow.add_node("code_generation", code_generation_node)
-    workflow.add_node("ast_validation", ast_validation_node)
-    workflow.add_node("test_generation", test_generation_node)
-    workflow.add_node("execution", execution_node)
-    workflow.add_node("evaluation", evaluation_node)
-
-    workflow.set_entry_point("route")
-    workflow.add_edge("route", "requirements")
-    workflow.add_edge("requirements", "code_generation")
-    workflow.add_edge("requirements", "test_generation")
-    workflow.add_edge("code_generation", "ast_validation")
-    workflow.add_edge(["ast_validation", "test_generation"], "execution")
-    workflow.add_edge("execution", "evaluation")
-    workflow.add_edge("evaluation", END)
-
-    return workflow.compile()
-
-
-def get_langgraph_flow_text() -> str:
-    """
-    Return a simple text view of the LangGraph workflow.
-    """
-    return " -> ".join(edge[0] for edge in LANGGRAPH_FLOW_EDGES) + " -> END"
-
-
-def get_langgraph_mermaid() -> str:
-    """
-    Return Mermaid text for displaying the workflow graph in notebooks/docs.
-    """
+    labels = {
+        "START": "START",
+        "route": "Router Agent",
+        "requirements": "Requirements Agent",
+        "code_generation": "Code Agent",
+        "test_generation": "Test Agent",
+        "ast_validation": "AST Validation",
+        "execution": "Execution Agent",
+        "evaluation": "Evaluator Agent",
+        "END": "END",
+    }
     lines = ["flowchart TD"]
 
-    for source, target in LANGGRAPH_FLOW_EDGES:
-        lines.append(f"    {source} --> {target}")
+    for source, target in WORKFLOW_GRAPH_EDGES:
+        lines.append(f"    {source}[{labels[source]}] --> {target}[{labels[target]}]")
 
     return "\n".join(lines)
 
 
-def display_langgraph_flow(output_format: str = "text") -> str:
+def show_workflow_graph() -> object:
     """
-    Display the LangGraph flow as text or Mermaid.
-
-    Use output_format="mermaid" in notebooks that support Mermaid rendering.
+    Display the workflow graph in a Jupyter notebook.
     """
-    if output_format == "mermaid":
-        flow = get_langgraph_mermaid()
-    elif output_format == "text":
-        flow = get_langgraph_flow_text()
-    else:
-        raise ValueError("output_format must be 'text' or 'mermaid'.")
-
-    print(flow)
-    return flow
-
-
-def display_compiled_langgraph_mermaid() -> str:
-    """
-    Return Mermaid text using LangGraph's built-in graph drawing API.
-    """
-    graph = build_langgraph_workflow()
-    mermaid = graph.get_graph().draw_mermaid()
-
-    return mermaid
-
-
-def display_compiled_langgraph_png() -> bytes:
-    """
-    Return PNG bytes using LangGraph's built-in graph drawing API.
-
-    In Jupyter:
-        from IPython.display import Image, display
-        display(Image(display_compiled_langgraph_png()))
-    """
-    graph = build_langgraph_workflow()
-    return graph.get_graph().draw_mermaid_png()
-
-
-def show_compiled_langgraph() -> object:
-    """
-    Render the compiled LangGraph directly in a notebook when IPython is available.
-    """
-    png_bytes = display_compiled_langgraph_png()
+    mermaid = get_workflow_mermaid()
 
     try:
-        from IPython.display import Image, display
+        from IPython.display import HTML, display
     except ImportError:
-        return png_bytes
+        return mermaid
 
-    image = Image(png_bytes)
-    display(image)
-    return image
-
-
-def run_langgraph_workflow(user_prompt: str) -> dict:
-    """
-    Run the LangGraph workflow version.
-    """
-    if not user_prompt or not user_prompt.strip():
-        raise ValueError("User prompt cannot be empty")
-
-    route = route_request(user_prompt)
-    if route.get("task_type") != "python":
-        return {
-            "success": False,
-            "error": "Current MVP supports Python generation only.",
-            "route": route,
-        }
-
-    graph = build_langgraph_workflow()
-    state = graph.invoke({"user_prompt": user_prompt})
-
-    ast_validation = state.get("ast_validation", {})
-    if ast_validation and not ast_validation.get("valid", False):
-        return {
-            "success": False,
-            "error": ast_validation.get("error"),
-            **state,
-        }
-
-    # TODO:
-    # save_result(...)
-
-    return state
+    graph = HTML(
+        f"""
+        <pre class="mermaid">
+{mermaid}
+        </pre>
+        <script type="module">
+            import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs";
+            mermaid.initialize({{ startOnLoad: true }});
+            mermaid.run();
+        </script>
+        """
+    )
+    display(graph)
+    return graph

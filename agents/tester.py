@@ -28,6 +28,9 @@ Rules:
 - Do not treat type hints as runtime validation
 - Do not expect TypeError for floats, strings, or None unless the code explicitly raises it
 - Prefer tests that should pass for the provided code
+- Manually verify every expected value before writing the assertion
+- For palindrome tasks, remember the expected result is based on whether the normalized string equals its reverse
+- Do not use ambiguous palindrome examples where the expected result is easy to misread
 """
 
 
@@ -77,6 +80,8 @@ Requirements:
 - Do not invent validation rules that are not present in the code
 - Type hints do not count as runtime validation
 - Do not expect TypeError for floats, strings, None, or collections unless the code explicitly checks and raises
+- Manually verify every expected value before writing the assertion
+- For palindrome tasks, only mark an input False if the normalized value is definitely not equal to its reverse
 - Prefer a compact test suite that should pass against the provided code
 
 Return only valid Python pytest code."""
@@ -118,6 +123,9 @@ Requirements:
 - Do not test implementation details
 - Do not invent validation rules unless the requirements explicitly ask for them
 - Type hints do not count as runtime validation
+- Do not expect TypeError for floats, strings, None, or collections unless validation is explicitly required
+- Manually verify every expected value before writing the assertion
+- For palindrome tasks, only mark an input False if the normalized value is definitely not equal to its reverse
 - Prefer tests that should pass for a straightforward implementation
 
 Return only valid Python pytest code."""

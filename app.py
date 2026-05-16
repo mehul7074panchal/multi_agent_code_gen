@@ -3,21 +3,16 @@ Multi-Agent Natural Language to Code System - Gradio UI
 Professional dashboard for AI-powered code generation workflow
 """
 
+import html as html_lib
 import json
+import re
 from datetime import datetime
 from typing import Optional, Tuple
 import traceback
 
 import gradio as gr
 
-# Import backend modules
-from agents.router import route_request
-from agents.requirements_agent import extract_requirements
-from agents.python_coder import generate_python_code
-from agents.test_writer import generate_test_cases
-from executor import run_tests
-from agents.evaluator import generate_coverage_report_json
-from memory.session_store import session_store, ExecutionResult
+from workflow import run_workflow
 
 # ============================================================================
 # EXAMPLE PROMPTS
@@ -73,53 +68,45 @@ def process_workflow(user_prompt: str) -> Tuple[str, str, str, str, str]:
     evaluation_json = None
     
     try:
-        # Step 1: Router Agent
-        logs = workflow_state.add_log("Router Agent", "Analyzing request type...")
-        route_result = route_request(user_prompt)
-        logs = workflow_state.add_log("Router Agent", f"✓ Detected: {route_result['task_type'].upper()} task")
-        
-        # Step 2: Requirements Agent
-        logs = workflow_state.add_log("Requirements Agent", "Extracting requirements...")
-        requirements = extract_requirements(user_prompt)
-        logs = workflow_state.add_log("Requirements Agent", f"✓ Extracted {len(requirements['requirements'])} requirements")
-        
-        # Step 3: Python Code Generation
-        logs = workflow_state.add_log("Code Generation Agent", "Generating Python code...")
-        generated_code = generate_python_code(user_prompt)
-        logs = workflow_state.add_log("Code Generation Agent", f"✓ Generated {len(generated_code.splitlines())} lines of code")
-        
-        # Step 4: Test Generation
-        logs = workflow_state.add_log("Test Generation Agent", "Creating pytest test cases...")
-        generated_tests = generate_test_cases(generated_code)
-        logs = workflow_state.add_log("Test Generation Agent", f"✓ Created {generated_tests.count('def test_')} test cases")
-        
-        # Step 5: Execution
-        logs = workflow_state.add_log("Execution Agent", "Running tests in sandbox...")
-        execution_results = run_tests(generated_code, generated_tests)
-        passed_count = execution_results["stdout"].count(" PASSED")
-        failed_count = execution_results["stdout"].count(" FAILED")
+        logs = workflow_state.add_log("System", "Starting multi-agent workflow...")
+        result = run_workflow(user_prompt)
+
+        if not result.get("success"):
+            raise ValueError(result.get("error", "Workflow failed"))
+
+        route_result = result.get("route", {})
+        requirements = result.get("requirements", {})
+        generated_code = result.get("generated_code")
+        generated_tests = result.get("generated_tests")
+        execution_results = result.get("execution_result")
+        evaluation = result.get("evaluation", {})
+        evaluation_json = evaluation.get("coverage_report", evaluation)
+
+        logs = workflow_state.add_log(
+            "Router Agent",
+            f"✓ Detected: {route_result.get('task_type', 'unknown').upper()} task",
+        )
+        logs = workflow_state.add_log(
+            "Requirements Agent",
+            f"✓ Extracted requirements for {requirements.get('function_name') or 'generated code'}",
+        )
+        logs = workflow_state.add_log(
+            "Code Generation Agent",
+            f"✓ Generated {len((generated_code or '').splitlines())} lines of code",
+        )
+        logs = workflow_state.add_log(
+            "Test Generation Agent",
+            f"✓ Created {(generated_tests or '').count('def test_')} test cases",
+        )
         logs = workflow_state.add_log(
             "Execution Agent",
-            f"✓ Tests completed: {passed_count} passed, {failed_count} failed"
+            "✓ Tests passed" if execution_results.get("success") else "✗ Tests failed",
         )
-        
-        # Step 6: Evaluation
-        logs = workflow_state.add_log("Evaluation Agent", "Computing coverage metrics...")
-        evaluation_results = generate_coverage_report_json(generated_code, generated_tests)
-        evaluation_json = json.loads(evaluation_results)
-        coverage_pct = evaluation_json.get("overall_coverage_percentage", 0)
-        logs = workflow_state.add_log("Evaluation Agent", f"✓ Coverage: {coverage_pct}%")
-        
+        logs = workflow_state.add_log(
+            "Evaluation Agent",
+            f"✓ Coverage: {evaluation_json.get('overall_coverage_percentage', 0)}%",
+        )
         logs = workflow_state.add_log("System", "✓ Workflow completed successfully")
-        
-        # Save to session store
-        execution = session_store.create_execution(user_prompt)
-        execution.generated_code = generated_code
-        execution.generated_tests = generated_tests
-        execution.execution_results = execution_results
-        execution.evaluation_results = evaluation_json
-        execution.status = "completed"
-        session_store.save_execution(execution)
         
     except Exception as e:
         logs = workflow_state.add_log("System", f"✗ Error: {str(e)}")
@@ -269,19 +256,34 @@ def render_tests_tab(tests: Optional[str]) -> str:
     """
     return html
 
+
+def _parse_pytest_counts(output: str) -> tuple[int, int]:
+    """Read pytest summary lines like '1 failed, 14 passed in 0.07s'."""
+    passed_matches = re.findall(r"(\d+)\s+passed", output)
+    failed_matches = re.findall(r"(\d+)\s+failed", output)
+
+    passed_count = int(passed_matches[-1]) if passed_matches else 0
+    failed_count = int(failed_matches[-1]) if failed_matches else 0
+
+    return passed_count, failed_count
+
+
 def render_execution_tab(execution_results: Optional[dict]) -> str:
     """Render the Execution Results tab"""
     if not execution_results:
         return "No execution results yet."
     
     stdout = execution_results.get("stdout", "")
+    stderr = execution_results.get("stderr", "")
+    output_text = stdout if stdout else stderr
     success = execution_results.get("success", False)
     
-    passed_count = stdout.count(" PASSED")
-    failed_count = stdout.count(" FAILED")
+    passed_count, failed_count = _parse_pytest_counts(f"{stdout}\n{stderr}")
     
     status_color = "#10b981" if success else "#ef4444"
     status_text = "✓ All Tests Passed" if success else "✗ Some Tests Failed"
+    output_color = "#10b981" if success else "#e2e8f0"
+    escaped_output = html_lib.escape(output_text)
     
     html = f"""
     <div style="display: flex; flex-direction: column; gap: 15px;">
@@ -292,7 +294,7 @@ def render_execution_tab(execution_results: Optional[dict]) -> str:
             </div>
         </div>
         <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 15px; overflow-x: auto; max-height: 500px; overflow-y: auto;">
-            <pre style="margin: 0; color: #10b981; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85em;"><code>{stdout}</code></pre>
+            <pre style="margin: 0; color: {output_color}; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.85em;"><code>{escaped_output}</code></pre>
         </div>
     </div>
     """
