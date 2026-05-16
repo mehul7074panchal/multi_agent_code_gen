@@ -5,6 +5,7 @@ Professional dashboard for AI-powered code generation workflow
 
 import html as html_lib
 import json
+import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -15,6 +16,12 @@ import traceback
 import gradio as gr
 
 from workflow import run_workflow
+
+
+LLM_MODELS = {
+    "openai": ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini"],
+    "groq": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+}
 
 # ============================================================================
 # WORKFLOW STATE MANAGEMENT
@@ -41,7 +48,50 @@ workflow_state = WorkflowState()
 # PROCESSING FUNCTIONS
 # ============================================================================
 
-def process_workflow(user_prompt: str) -> Iterator[tuple[str, str, str, str, str]]:
+
+def _default_provider() -> str:
+    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+    return provider if provider in LLM_MODELS else "openai"
+
+
+def _default_model(provider: str) -> str:
+    env_name = "OPENAI_MODEL" if provider == "openai" else "GROQ_MODEL"
+    model = os.getenv(env_name, "").strip()
+    return model if model in LLM_MODELS[provider] else LLM_MODELS[provider][0]
+
+
+def _llm_status(provider: str, model: str) -> str:
+    return f"LLM: {provider.upper()} / {model}"
+
+
+def update_llm_model(provider: str) -> tuple[object, str]:
+    provider = provider or "openai"
+    model = _default_model(provider)
+    return gr.update(choices=LLM_MODELS[provider], value=model), _llm_status(provider, model)
+
+
+def update_llm_status(provider: str, model: str) -> str:
+    return _llm_status(provider or "openai", model or _default_model(provider or "openai"))
+
+
+def _apply_llm_selection(provider: str, model: str) -> tuple[str, str]:
+    provider = provider or "openai"
+    model = model or _default_model(provider)
+
+    os.environ["LLM_PROVIDER"] = provider
+    if provider == "openai":
+        os.environ["OPENAI_MODEL"] = model
+    else:
+        os.environ["GROQ_MODEL"] = model
+
+    return provider, model
+
+
+def process_workflow(
+    user_prompt: str,
+    llm_provider: str,
+    llm_model: str,
+) -> Iterator[tuple[str, str, str, str, str]]:
     """
     Execute the workflow and stream log updates to the UI.
     """
@@ -50,6 +100,7 @@ def process_workflow(user_prompt: str) -> Iterator[tuple[str, str, str, str, str
         raise ValueError("Please enter a coding request")
     
     workflow_state.reset()
+    llm_provider, llm_model = _apply_llm_selection(llm_provider, llm_model)
     generated_code = None
     generated_tests = None
     execution_results = None
@@ -63,6 +114,7 @@ def process_workflow(user_prompt: str) -> Iterator[tuple[str, str, str, str, str
     
     try:
         logs = workflow_state.add_log("System", "Starting multi-agent workflow...")
+        logs = workflow_state.add_log("LLM", f"Using {llm_provider.upper()} / {llm_model}")
         yield logs, *empty_outputs
 
         with ThreadPoolExecutor(max_workers=1) as executor:
@@ -340,6 +392,23 @@ def create_app():
         with gr.Row():
             with gr.Column(scale=1, min_width=400):
                 gr.Markdown("### 📝 Enter Your Coding Request", elem_id="left-panel-title")
+
+                default_provider = _default_provider()
+                default_model = _default_model(default_provider)
+
+                with gr.Row():
+                    provider_dropdown = gr.Dropdown(
+                        choices=list(LLM_MODELS.keys()),
+                        value=default_provider,
+                        label="Provider",
+                    )
+                    model_dropdown = gr.Dropdown(
+                        choices=LLM_MODELS[default_provider],
+                        value=default_model,
+                        label="Model",
+                    )
+
+                llm_status = gr.Markdown(_llm_status(default_provider, default_model))
                 
                 user_input = gr.Textbox(
                     label=None,
@@ -384,6 +453,18 @@ def create_app():
         # Clear button functionality
         def clear_all():
             return "", "", "", "", "", ""
+
+        provider_dropdown.change(
+            update_llm_model,
+            inputs=[provider_dropdown],
+            outputs=[model_dropdown, llm_status],
+        )
+
+        model_dropdown.change(
+            update_llm_status,
+            inputs=[provider_dropdown, model_dropdown],
+            outputs=[llm_status],
+        )
         
         clear_btn.click(
             clear_all,
@@ -400,7 +481,7 @@ def create_app():
         # Generate button functionality
         generate_btn.click(
             process_workflow,
-            inputs=[user_input],
+            inputs=[user_input, provider_dropdown, model_dropdown],
             outputs=[
                 logs_display,
                 code_output,
